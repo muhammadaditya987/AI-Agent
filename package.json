@@ -1,0 +1,26 @@
+{
+  "name": "ai-agency-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "ts-node --project apps/api/tsconfig.json apps/api/src/main.ts",
+    "build": "npm run build --workspace @ai-agency/api",
+    "start": "node apps/api/dist/main.js",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspace @ai-agency/api",
+    "test": "npm run build && node --test apps/api/test/*.test.cjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
+  }
+}

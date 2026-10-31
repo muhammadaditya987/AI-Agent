@@ -1,0 +1,11 @@
+[Unit]
+Description=Encrypted AI Agency PostgreSQL and n8n backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ai-agency/scripts/backup-production.sh
+User=root
+Group=root
+UMask=0077

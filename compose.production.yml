@@ -1,0 +1,426 @@
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    tag: "{{.Name}}"
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-platform_admin}
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      APP_DB_NAME: ${APP_DB_NAME:-ai_agency}
+      APP_DB_USER: ${APP_DB_USER:-ai_agency_app}
+      APP_DB_PASSWORD_FILE: /run/secrets/app_db_password
+      N8N_DB_NAME: ${N8N_DB_NAME:-n8n}
+      N8N_DB_USER: ${N8N_DB_USER:-n8n_app}
+      N8N_DB_PASSWORD_FILE: /run/secrets/n8n_db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - postgres_admin_password
+      - app_db_password
+      - n8n_db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --include
+      - /run/secrets/redis.conf
+    volumes:
+      - redis_data:/data
+    secrets:
+      - redis.conf
+      - redis_password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+
+  n8n:
+    image: ${N8N_IMAGE:?Set N8N_IMAGE in production.env}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n_app}
+      DB_POSTGRESDB_SCHEMA: public
+      N8N_METRICS: "true"
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_DB: 1
+      N8N_HOST: ${N8N_DOMAIN:?Set N8N_DOMAIN in production.env}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      N8N_EDITOR_BASE_URL: https://${N8N_DOMAIN:?Set N8N_DOMAIN in production.env}/
+      WEBHOOK_URL: https://${N8N_DOMAIN:?Set N8N_DOMAIN in production.env}/
+      N8N_PROXY_HOPS: "1"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_SECURE_COOKIE: "true"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_LOG_LEVEL: info
+      TZ: UTC
+    entrypoint: ["tini", "--", "/bin/sh", "-ec"]
+    command:
+      - |
+        export DB_POSTGRESDB_PASSWORD="$$(cat /run/secrets/n8n_db_password)"
+        export QUEUE_BULL_REDIS_PASSWORD="$$(cat /run/secrets/redis_password)"
+        export N8N_ENCRYPTION_KEY="$$(cat /run/secrets/n8n_encryption_key)"
+        exec /docker-entrypoint.sh start
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    secrets:
+      - n8n_db_password
+      - redis_password
+      - n8n_encryption_key
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5678/healthz/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - egress
+
+  n8n-worker:
+    image: ${N8N_IMAGE:?Set N8N_IMAGE in production.env}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n_app}
+      DB_POSTGRESDB_SCHEMA: public
+      N8N_METRICS: "true"
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_BULL_REDIS_PORT: 6379
+      QUEUE_BULL_REDIS_DB: 1
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_LOG_LEVEL: info
+      TZ: UTC
+    entrypoint: ["tini", "--", "/bin/sh", "-ec"]
+    command:
+      - |
+        export DB_POSTGRESDB_PASSWORD="$$(cat /run/secrets/n8n_db_password)"
+        export QUEUE_BULL_REDIS_PASSWORD="$$(cat /run/secrets/redis_password)"
+        export N8N_ENCRYPTION_KEY="$$(cat /run/secrets/n8n_encryption_key)"
+        exec /docker-entrypoint.sh worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    secrets:
+      - n8n_db_password
+      - redis_password
+      - n8n_encryption_key
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5678/metrics').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - egress
+
+  api:
+    image: ${API_IMAGE:?Set API_IMAGE to a published immutable image}
+    restart: unless-stopped
+    stop_grace_period: 130s
+    logging: *default-logging
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${APP_DB_NAME:-ai_agency}
+      DATABASE_USER: ${APP_DB_USER:-ai_agency_app}
+      DATABASE_PASSWORD_FILE: /run/secrets/app_db_password
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_DB: 0
+      N8N_BASE_URL: http://n8n:5678
+      AUTOMATION_SHARED_TOKEN_FILE: /run/secrets/automation_shared_token
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-90000}
+      NOTION_API_KEY_FILE: /run/secrets/notion_api_key
+      NOTION_PARENT_PAGE_ID: ${NOTION_PARENT_PAGE_ID:-}
+      NOTION_API_VERSION: ${NOTION_API_VERSION:-2026-03-11}
+      NOTION_TIMEOUT_MS: ${NOTION_TIMEOUT_MS:-15000}
+      WHATSAPP_DRY_RUN: "true"
+      WHATSAPP_ALLOWED_RECIPIENT: ${WHATSAPP_ALLOWED_RECIPIENT:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    secrets:
+      - app_db_password
+      - redis_password
+      - automation_shared_token
+      - openai_api_key
+      - notion_api_key
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - egress
+
+  prometheus:
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/deployment/production/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/deployment/production/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - monitoring-admin
+      - logging
+
+  loki:
+    image: grafana/loki:3.5.0@sha256:4c431d2e6b9b38718694b31c5d56be7c80dc69c513215fde1aeb5b02cd4e2665
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - -config.file=/etc/loki/loki.yml
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./infra/deployment/production/loki-config.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - logging
+      - monitoring-admin
+
+  alloy:
+    image: grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    user: "473:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ./infra/deployment/production/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - ${DOCKER_LOG_DIR:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
+      - alloy_data:/var/lib/alloy
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - logging
+
+  grafana:
+    image: grafana/grafana:12.1.1@sha256:a1701c2180249361737a99a01bc770db39381640e4d631825d38ff4535efa47d
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/deployment/production/grafana-provisioning:/etc/grafana/provisioning:ro
+      - ./infra/deployment/production/grafana-dashboards:/var/lib/grafana/dashboards:ro
+    secrets:
+      - grafana_admin_password
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - monitoring-admin
+      - logging
+
+  nginx:
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NGINX_ENVSUBST_FILTER: "^(API_DOMAIN|N8N_DOMAIN)$"
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in production.env}
+      N8N_DOMAIN: ${N8N_DOMAIN:?Set N8N_DOMAIN in production.env}
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./infra/deployment/production/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - platform
+      - edge
+
+networks:
+  platform:
+    driver: bridge
+    internal: true
+  edge:
+    driver: bridge
+  egress:
+    driver: bridge
+  monitoring-admin:
+    driver: bridge
+  logging:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  alloy_data:
+
+secrets:
+  postgres_admin_password:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/postgres_admin_password
+  app_db_password:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/app_db_password
+  n8n_db_password:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/n8n_db_password
+  redis_password:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/redis_password
+  redis.conf:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/redis.conf
+  n8n_encryption_key:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/n8n_encryption_key
+  automation_shared_token:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/automation_shared_token
+  openai_api_key:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/openai_api_key
+  notion_api_key:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/notion_api_key
+  grafana_admin_password:
+    file: ${SECRETS_DIR:-/etc/ai-agency/secrets}/grafana_admin_password

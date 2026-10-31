@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew AI Agency TLS certificates
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ai-agency/scripts/renew-production-tls.sh
+User=root
+Group=root

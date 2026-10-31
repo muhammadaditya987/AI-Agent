@@ -1,0 +1,272 @@
+{
+  "name": "AI Content Factory - Sprint 2",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "AI Content Factory",
+        "formDescription": "Buat satu project lagu anak. WhatsApp hanya dibuat sebagai preview pada Sprint 2; tidak ada pesan yang dikirim.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Keyword",
+              "fieldName": "keyword",
+              "fieldType": "text",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Target Usia",
+              "fieldName": "targetAge",
+              "fieldType": "text",
+              "placeholder": "Contoh: 2-5 tahun",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Bahasa",
+              "fieldName": "language",
+              "fieldType": "text",
+              "defaultValue": "Indonesia",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "buttonLabel": "Buat project"
+        }
+      },
+      "id": "ef0a1a5d-1286-46ce-a0be-42da9b376508",
+      "name": "AI Content Factory Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.4,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/content-factory/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { keyword: $('AI Content Factory Form').first().json.keyword, targetAge: $('AI Content Factory Form').first().json.targetAge, language: $('AI Content Factory Form').first().json.language } }}",
+        "options": {
+          "timeout": 100000
+        }
+      },
+      "id": "bb4236e2-ad91-40b9-bd21-7d028951a1e2",
+      "name": "Generate Content Assets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/notion/projects",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { brief: { keyword: $('AI Content Factory Form').first().json.keyword, targetAge: $('AI Content Factory Form').first().json.targetAge, language: $('AI Content Factory Form').first().json.language }, assets: $('Generate Content Assets').first().json.data.assets } }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "80242ccd-0f65-469e-8b92-98f363c94642",
+      "name": "Save Project to Notion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const brief = $('AI Content Factory Form').first().json;\nconst assets = $('Generate Content Assets').first().json.data.assets;\nconst notion = $('Save Project to Notion').first().json.data;\nreturn [{ json: { eventType: 'project_ready', title: assets.title, duration: assets.estimatedDuration, keyword: brief.keyword, notionUrl: notion.pageUrl } }];"
+      },
+      "id": "661b6ed0-6588-4ed1-b558-966eb189cbad",
+      "name": "Prepare Success Notification Preview",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/whatsapp/preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "66daf799-8672-4700-b177-51bdafbe26d5",
+      "name": "WhatsApp Success Dry Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        220
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { eventType: 'workflow_failed', failureStage: 'openai_generation', errorCode: 'OPENAI_REQUEST_FAILED' } }];"
+      },
+      "id": "d0234bca-5ae7-4a63-a00a-3bd03b47ccf8",
+      "name": "Prepare OpenAI Failure Preview",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { eventType: 'workflow_failed', failureStage: 'notion_save', errorCode: 'NOTION_CREATE_FAILED' } }];"
+      },
+      "id": "97ae05b0-7da5-4c0d-9f7e-93c76f02c2eb",
+      "name": "Prepare Notion Failure Preview",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/whatsapp/preview",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "61b28eaa-4ac7-4879-9ddd-45f91f24a47f",
+      "name": "WhatsApp Error Dry Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        480
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Content Factory Form": {
+      "main": [
+        [
+          {
+            "node": "Generate Content Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Content Assets": {
+      "main": [
+        [
+          {
+            "node": "Save Project to Notion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare OpenAI Failure Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Project to Notion": {
+      "main": [
+        [
+          {
+            "node": "Prepare Success Notification Preview",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Notion Failure Preview",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Success Notification Preview": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Success Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare OpenAI Failure Preview": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Error Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notion Failure Preview": {
+      "main": [
+        [
+          {
+            "node": "WhatsApp Error Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "fbf46c7a-90c6-479c-90ed-6d10d11bab59",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

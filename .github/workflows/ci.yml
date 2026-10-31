@@ -1,0 +1,184 @@
+name: CI and production deployment
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Build API image
+        run: docker build --pull --tag ai-agency-api:ci --file infra/docker/api.Dockerfile .
+
+      - name: Validate production Compose and host scripts
+        run: |
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          install -d -m 0700 "$temp_dir/secrets"
+          for name in \
+            postgres_admin_password app_db_password n8n_db_password redis_password \
+            n8n_encryption_key automation_shared_token grafana_admin_password \
+            openai_api_key notion_api_key; do
+            : > "$temp_dir/secrets/$name"
+          done
+          printf 'requirepass validation-only\n' > "$temp_dir/secrets/redis.conf"
+          chmod 0444 "$temp_dir/secrets/"*
+          SECRETS_DIR="$temp_dir/secrets" \
+            docker compose \
+              --env-file infra/deployment/production/production.env.example \
+              -f compose.production.yml config --quiet
+          bash -n scripts/*.sh
+
+      - name: Validate Prometheus rules and dashboard JSON
+        run: |
+          docker run --rm \
+            --volume "$PWD/infra/deployment/production/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            --volume "$PWD/infra/deployment/production/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro" \
+            --entrypoint /bin/promtool \
+            prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            --volume "$PWD/infra/deployment/production/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro" \
+            --entrypoint /bin/promtool \
+            prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996 \
+            check rules /etc/prometheus/alert-rules.yml
+          docker run --rm \
+            --volume "$PWD/infra/deployment/production/loki-config.yml:/etc/loki/loki.yml:ro" \
+            --entrypoint /usr/bin/loki \
+            grafana/loki:3.5.0@sha256:4c431d2e6b9b38718694b31c5d56be7c80dc69c513215fde1aeb5b02cd4e2665 \
+            -config.file=/etc/loki/loki.yml -verify-config
+          docker run --rm \
+            --volume "$PWD/infra/deployment/production/alloy-config.alloy:/etc/alloy/config.alloy:ro" \
+            --entrypoint /bin/alloy \
+            grafana/alloy:v1.10.2@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223 \
+            validate /etc/alloy/config.alloy
+          for dashboard in infra/deployment/production/grafana-dashboards/*.json; do
+            python -m json.tool "$dashboard" > /dev/null
+          done
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set immutable image name
+        id: image
+        run: |
+          repository="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "name=ghcr.io/${repository}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GHCR
+        run: |
+          printf '%s' "$GITHUB_TOKEN" |
+            docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable image
+        run: |
+          docker build --pull --tag "$IMAGE" --file infra/docker/api.Dockerfile .
+          docker push "$IMAGE"
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out deployment configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_SSH_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 0600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Transfer deployment files
+        env:
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          if [[ ! "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
+            echo "Set DEPLOY_PATH to a safe absolute path such as /opt/ai-agency." >&2
+            exit 1
+          fi
+          DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh "$DEPLOY_TARGET" "mkdir -p '$DEPLOY_PATH'"
+          scp -r compose.production.yml infra scripts "$DEPLOY_TARGET:$DEPLOY_PATH/"
+
+      - name: Deploy and wait for healthy services
+        env:
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          IMAGE_REPOSITORY: ${{ github.repository }}
+          IMAGE_SHA: ${{ github.sha }}
+        run: |
+          DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh "$DEPLOY_TARGET" \
+            "sudo chmod 0750 '$DEPLOY_PATH'/scripts/*.sh && sudo APP_DIR='$DEPLOY_PATH' bash '$DEPLOY_PATH/scripts/deploy-production.sh' '$IMAGE_SHA' '$IMAGE_REPOSITORY'"
+
+      - name: Verify public API health and metrics
+        env:
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          if [[ ! "$API_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo "Set API_DOMAIN to the public API hostname." >&2
+            exit 1
+          fi
+          DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
+          ssh "$DEPLOY_TARGET" \
+            "sudo APP_DIR='$DEPLOY_PATH' bash '$DEPLOY_PATH/scripts/smoke-production.sh' 'https://$API_DOMAIN'"

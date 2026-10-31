@@ -1,0 +1,76 @@
+groups:
+  - name: ai-agency-service-health
+    rules:
+      - alert: AiAgencyApiUnavailable
+        expr: up{job="ai-agency-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: AI Agency API metrics target is unavailable
+          description: Prometheus has failed to scrape the API for at least two minutes.
+
+      - alert: N8nUnavailable
+        expr: up{job="n8n"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: n8n metrics target is unavailable
+          description: Prometheus has failed to scrape n8n for at least two minutes.
+
+      - alert: N8nWorkerUnavailable
+        expr: up{job="n8n-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: n8n worker metrics target is unavailable
+          description: Prometheus has failed to scrape the n8n worker for at least two minutes.
+
+      - alert: LokiUnavailable
+        expr: up{job="loki"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Loki log storage is unavailable
+          description: Prometheus has failed to scrape Loki for at least two minutes.
+
+      - alert: AlloyUnavailable
+        expr: up{job="alloy"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Alloy log collection is unavailable
+          description: Prometheus has failed to scrape Alloy for at least two minutes.
+
+  - name: ai-agency-api-slo
+    rules:
+      - alert: AiAgencyHighHttp5xxRate
+        expr: |
+          (
+            sum(rate(ai_agency_http_requests_total{status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(ai_agency_http_requests_total[5m])), 1e-9)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AI Agency API 5xx rate is above 5%
+          description: The API 5xx ratio has remained above 5% for ten minutes.
+
+      - alert: AiAgencyHighApiLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(ai_agency_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AI Agency API p95 latency is above two seconds
+          description: The API p95 response time has remained high for ten minutes.
