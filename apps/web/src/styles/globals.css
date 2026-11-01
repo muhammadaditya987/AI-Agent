@@ -1,0 +1,85 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light;
+  --background: #f5f8f6;
+  --foreground: #152321;
+  --panel: #ffffff;
+  --muted: #edf2ef;
+  --muted-foreground: #64736e;
+  --border: #dce5e0;
+  --sidebar: #f0f5f2;
+  --ink: #12211f;
+  --teal-100: #d9f3e8;
+  --teal-700: #087c68;
+  --teal-800: #075e51;
+  --teal-900: #06483f;
+  --teal-950: #062f2a;
+  --amber-50: #fff7e8;
+  --amber-100: #ffedc9;
+  --amber-900: #77400d;
+  --amber-950: #42220c;
+  --coral-100: #ffe4dc;
+  --coral-200: #fecfc1;
+  --coral-300: #fda58b;
+  --coral-600: #d14c36;
+  --coral-700: #b63a2b;
+  --coral-800: #943022;
+  --coral-900: #70261d;
+  --coral-950: #3c1712;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #101817;
+  --foreground: #e8efeb;
+  --panel: #17211f;
+  --muted: #202c29;
+  --muted-foreground: #a0b0aa;
+  --border: #2b3a35;
+  --sidebar: #141d1b;
+  --ink: #12211f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-sidebar: var(--sidebar);
+  --color-ink: var(--ink);
+  --color-teal-100: var(--teal-100);
+  --color-teal-700: var(--teal-700);
+  --color-teal-800: var(--teal-800);
+  --color-teal-900: var(--teal-900);
+  --color-teal-950: var(--teal-950);
+  --color-amber-50: var(--amber-50);
+  --color-amber-100: var(--amber-100);
+  --color-amber-900: var(--amber-900);
+  --color-amber-950: var(--amber-950);
+  --color-coral-100: var(--coral-100);
+  --color-coral-200: var(--coral-200);
+  --color-coral-300: var(--coral-300);
+  --color-coral-600: var(--coral-600);
+  --color-coral-700: var(--coral-700);
+  --color-coral-800: var(--coral-800);
+  --color-coral-900: var(--coral-900);
+  --color-coral-950: var(--coral-950);
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: #a8e7d2; color: #12211f; }

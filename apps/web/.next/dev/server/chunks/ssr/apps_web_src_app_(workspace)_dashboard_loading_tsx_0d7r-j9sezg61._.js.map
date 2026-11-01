@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///F:/Project/AI%20Agency/apps/web/src/app/(workspace)/dashboard/loading.tsx"],"sourcesContent":["export default function DashboardLoading() {\r\n  return (\r\n    <div className=\"space-y-8\" aria-label=\"Loading dashboard\">\r\n      <div className=\"space-y-3 border-b border-border pb-7\"><div className=\"h-3 w-24 animate-pulse bg-muted\" /><div className=\"h-10 w-2/3 animate-pulse bg-muted\" /><div className=\"h-4 w-1/2 animate-pulse bg-muted\" /></div>\r\n      <div className=\"grid gap-4 sm:grid-cols-2 xl:grid-cols-3\">{[1, 2, 3].map((item) => <div key={item} className=\"h-38.5 animate-pulse border border-border bg-muted\" />)}</div>\r\n      <div className=\"h-64 animate-pulse border border-border bg-muted\" />\r\n    </div>\r\n  );\r\n}"],"names":["DashboardLoading","className","map","item"],"mappings":";;;;;;AAAe,SAASA;IACtB,qBACE,8OAAC;QAAIC,WAAU;QAAY,cAAW;;0BACpC,8OAAC;gBAAIA,WAAU;;kCAAwC,8OAAC;wBAAIA,WAAU;;;;;;kCAAoC,8OAAC;wBAAIA,WAAU;;;;;;kCAAsC,8OAAC;wBAAIA,WAAU;;;;;;;;;;;;0BAC9K,8OAAC;gBAAIA,WAAU;0BAA4C;oBAAC;oBAAG;oBAAG;iBAAE,CAACC,GAAG,CAAC,CAACC,qBAAS,8OAAC;wBAAeF,WAAU;uBAAhBE;;;;;;;;;;0BAC7F,8OAAC;gBAAIF,WAAU;;;;;;;;;;;;AAGrB"}}]
+}
